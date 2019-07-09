@@ -177,6 +177,45 @@ test_expect_success 'push (chunked)' '
 	 test $HEAD = $(git rev-parse --verify HEAD))
 '
 
+test_expect_success 'push --atomic also prevents branch creation, reports collateral' '
+	# Setup upstream repo - empty for now
+	d=$HTTPD_DOCUMENT_ROOT_PATH/atomic-branches.git &&
+	git init --bare "$d" &&
+	test_config -C "$d" http.receivepack true &&
+	up="$HTTPD_URL"/smart/atomic-branches.git &&
+
+	# Tell up about two branches for now
+	test_commit atomic1 &&
+	test_commit atomic2 &&
+	git branch collateral &&
+	git push "$up" master collateral &&
+
+	# collateral is a valid push, but should be failed by atomic push
+	git checkout collateral &&
+	test_commit collateral1 &&
+
+	# Make master incompatible with upstream to provoke atomic
+	git checkout master &&
+	git reset --hard HEAD^ &&
+
+	# Add a new branch which should be failed by atomic push. This is a
+	# regression case.
+	git branch atomic &&
+
+	# --atomic should cause entire push to be rejected
+	test_must_fail git push --atomic "$up" master atomic collateral 2>output &&
+
+	# the new branch should not have been created upstream
+	test_must_fail git -C "$d" rev-parse refs/heads/atomic &&
+
+	# the failed refs should be indicated
+	grep "master -> master" output | grep rejected &&
+
+	# the collateral failure refs should be indicated
+	grep "atomic -> atomic" output | grep "atomic push failed" &&
+	grep "collateral -> collateral" output | grep "atomic push failed"
+'
+
 test_expect_success 'push --all can push to empty repo' '
 	d=$HTTPD_DOCUMENT_ROOT_PATH/empty-all.git &&
 	git init --bare "$d" &&
